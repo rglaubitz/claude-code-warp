@@ -22,10 +22,20 @@ sleep 0.3
 QUERY=""
 RESPONSE=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-    # Get the last user prompt (most recent turn, not the first in the session)
-    # .message.content can be a string or an array of {type, text} objects
+    # Get the last human prompt from the transcript.
+    # "user" type messages include both human prompts and tool-result messages.
+    # Human prompts have content that is either a plain string or an array
+    # containing {type:"text"} blocks. Tool-result messages have content arrays
+    # containing only {type:"tool_result"} blocks. We filter to messages that
+    # have at least one "text" block (or are a plain string).
     QUERY=$(jq -rs '
-        [.[] | select(.type == "user")] | last |
+        [
+            .[] | select(.type == "user") |
+            if .message.content | type == "string" then .
+            elif [.message.content[] | select(.type == "text")] | length > 0 then .
+            else empty
+            end
+        ] | last |
         if .message.content | type == "array"
         then [.message.content[] | select(.type == "text") | .text] | join(" ")
         else .message.content // empty
