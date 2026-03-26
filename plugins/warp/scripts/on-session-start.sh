@@ -11,6 +11,15 @@ EOF
     exit 0
 fi
 
+if [ -z "$WARP_CLI_AGENT_PROTOCOL_VERSION" ]; then
+    cat << 'EOF'
+{
+  "systemMessage": "⚠️ Please update Warp to get agent notifications — your terminal does not declare cli-agent protocol support"
+}
+EOF
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/build-payload.sh"
 
