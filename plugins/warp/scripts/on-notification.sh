@@ -3,9 +3,10 @@
 # Sends a structured Warp notification when Claude has been idle
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/should-use-structured.sh"
 
 # Legacy fallback for old Warp versions
-if [ -z "$WARP_CLI_AGENT_PROTOCOL_VERSION" ]; then
+if ! should_use_structured; then
     [ "$TERM_PROGRAM" = "WarpTerminal" ] && exec "$SCRIPT_DIR/legacy/on-notification.sh"
     exit 0
 fi

@@ -3,9 +3,10 @@
 # Shows welcome message, Warp detection status, and emits plugin version
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/should-use-structured.sh"
 
 # Legacy fallback for old Warp versions
-if [ -z "$WARP_CLI_AGENT_PROTOCOL_VERSION" ]; then
+if ! should_use_structured; then
     exec "$SCRIPT_DIR/legacy/on-session-start.sh"
 fi
 

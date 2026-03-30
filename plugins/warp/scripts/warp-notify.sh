@@ -5,10 +5,11 @@
 # For structured Warp notifications, title should be "warp://cli-agent"
 # and body should be a JSON string matching the cli-agent notification schema.
 
-# Only emit notifications when Warp declares protocol support.
-# This avoids garbled OSC sequences in non-Warp terminals
-# (and works over SSH where TERM_PROGRAM isn't propagated).
-if [ -z "$WARP_CLI_AGENT_PROTOCOL_VERSION" ]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/should-use-structured.sh"
+
+# Only emit notifications when we've confirmed the Warp build can render them.
+if ! should_use_structured; then
     exit 0
 fi
 

@@ -3,9 +3,10 @@
 # Sends a structured Warp notification when Claude needs permission to run a tool
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/should-use-structured.sh"
 
 # No legacy equivalent for this hook
-if [ -z "$WARP_CLI_AGENT_PROTOCOL_VERSION" ]; then
+if ! should_use_structured; then
     exit 0
 fi
 

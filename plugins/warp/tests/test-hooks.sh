@@ -142,6 +142,60 @@ PLUGIN_CURRENT_PROTOCOL_VERSION=1
 # Clean up
 unset WARP_CLI_AGENT_PROTOCOL_VERSION
 
+echo ""
+echo "=== should-use-structured.sh ==="
+
+source "$SCRIPT_DIR/../scripts/should-use-structured.sh"
+
+echo ""
+echo "--- No protocol version → legacy ---"
+unset WARP_CLI_AGENT_PROTOCOL_VERSION
+unset WARP_CLIENT_VERSION
+should_use_structured
+assert_eq "no protocol version returns false" "1" "$?"
+
+echo ""
+echo "--- Protocol set, no client version → legacy ---"
+export WARP_CLI_AGENT_PROTOCOL_VERSION=1
+unset WARP_CLIENT_VERSION
+should_use_structured
+assert_eq "missing WARP_CLIENT_VERSION returns false" "1" "$?"
+
+echo ""
+echo "--- Protocol set, dev version → always structured (dev was never broken) ---"
+export WARP_CLI_AGENT_PROTOCOL_VERSION=1
+export WARP_CLIENT_VERSION="v0.2026.03.30.08.43.dev_00"
+should_use_structured
+assert_eq "dev version returns true" "0" "$?"
+
+echo ""
+echo "--- Protocol set, broken stable version → legacy ---"
+export WARP_CLIENT_VERSION="v0.2026.03.25.08.24.stable_05"
+should_use_structured
+assert_eq "exact broken stable version returns false" "1" "$?"
+
+echo ""
+echo "--- Protocol set, newer stable version → structured ---"
+export WARP_CLIENT_VERSION="v0.2026.04.01.08.00.stable_00"
+should_use_structured
+assert_eq "newer stable version returns true" "0" "$?"
+
+echo ""
+echo "--- Protocol set, broken preview version → legacy ---"
+export WARP_CLIENT_VERSION="v0.2026.03.25.08.24.preview_05"
+should_use_structured
+assert_eq "exact broken preview version returns false" "1" "$?"
+
+echo ""
+echo "--- Protocol set, newer preview version → structured ---"
+export WARP_CLIENT_VERSION="v0.2026.04.01.08.00.preview_00"
+should_use_structured
+assert_eq "newer preview version returns true" "0" "$?"
+
+# Clean up
+unset WARP_CLI_AGENT_PROTOCOL_VERSION
+unset WARP_CLIENT_VERSION
+
 # --- Routing tests ---
 # These test the hook scripts as subprocesses to verify routing behavior.
 # We override /dev/tty writes since they'd fail in CI.
