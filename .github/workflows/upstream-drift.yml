@@ -41,15 +41,32 @@ jobs:
         run: |
           if [ -f .upstream-sha ]; then
             BASE=$(cat .upstream-sha | tr -d '[:space:]')
+            FIRST_RUN=false
             echo "Using stored SHA: $BASE"
           else
             # First run: use upstream's main HEAD as the baseline so we
             # don't fire a giant retroactive diff. Future runs will see
-            # only forward drift from this point.
+            # only forward drift from this point. We persist the file
+            # at the end of this run so subsequent invocations have a
+            # stable floor.
             BASE=$(git rev-parse upstream/main)
-            echo "First run; baseline = $BASE"
+            FIRST_RUN=true
+            echo "First run; baseline = $BASE (will persist below)"
           fi
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "first_run=$FIRST_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Persist initial baseline (first run only)
+        if: steps.base.outputs.first_run == 'true'
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          echo "$BASE" > .upstream-sha
+          git config user.name "upstream-drift-bot"
+          git config user.email "upstream-drift-bot@users.noreply.github.com"
+          git add .upstream-sha
+          git commit -m "chore: seed upstream baseline ${BASE:0:7}"
+          git push origin HEAD:main
 
       - name: Resolve upstream HEAD
         id: head
