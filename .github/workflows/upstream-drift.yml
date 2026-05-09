@@ -1,0 +1,157 @@
+name: upstream-drift
+
+# Daily check against warpdotdev/claude-code-warp. If risky files have
+# changed since the last triaged SHA, open an issue with the diff and
+# label it `upstream-drift` — that label is what triggers the Claude
+# responder workflow.
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # daily 14:00 UTC (≈ 7am Pacific)
+  workflow_dispatch: {}    # manual trigger from the Actions tab
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM_REPO: warpdotdev/claude-code-warp
+  RISKY_PATHS: |
+    plugins/warp/scripts/should-use-structured.sh
+    plugins/warp/scripts/build-payload.sh
+    plugins/warp/hooks/hooks.json
+    .claude-plugin/marketplace.json
+    plugins/warp/.claude-plugin/plugin.json
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream main --depth=200
+
+      - name: Resolve last-checked SHA
+        id: base
+        run: |
+          if [ -f .upstream-sha ]; then
+            BASE=$(cat .upstream-sha | tr -d '[:space:]')
+            echo "Using stored SHA: $BASE"
+          else
+            # First run: use upstream's main HEAD as the baseline so we
+            # don't fire a giant retroactive diff. Future runs will see
+            # only forward drift from this point.
+            BASE=$(git rev-parse upstream/main)
+            echo "First run; baseline = $BASE"
+          fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve upstream HEAD
+        id: head
+        run: |
+          HEAD=$(git rev-parse upstream/main)
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+
+      - name: Detect drift
+        id: drift
+        run: |
+          BASE="${{ steps.base.outputs.base }}"
+          HEAD="${{ steps.head.outputs.head }}"
+
+          if [ "$BASE" = "$HEAD" ]; then
+            echo "no_drift=true" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits since $BASE."
+            exit 0
+          fi
+
+          # Filter the file list to non-empty lines and pass to git diff.
+          PATHS=$(echo "$RISKY_PATHS" | sed '/^[[:space:]]*$/d' | xargs)
+          # shellcheck disable=SC2086
+          RISKY_DIFF=$(git diff --stat "$BASE" "$HEAD" -- $PATHS || true)
+
+          if [ -z "$RISKY_DIFF" ]; then
+            echo "no_drift=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream advanced ($BASE → $HEAD) but no risky files changed. Auto-bumping baseline."
+            # Auto-advance the baseline when only safe files (READMEs,
+            # docs, on-*.sh that we override anyway) changed.
+            echo "$HEAD" > .upstream-sha
+            git config user.name "upstream-drift-bot"
+            git config user.email "upstream-drift-bot@users.noreply.github.com"
+            git add .upstream-sha
+            git commit -m "chore: auto-bump upstream baseline (no risky drift)" || true
+            git push origin main || true
+            exit 0
+          fi
+
+          echo "no_drift=false" >> "$GITHUB_OUTPUT"
+
+          # Build the issue body
+          {
+            echo "## 🚨 Upstream drift in risky files"
+            echo ""
+            echo "Upstream \`${UPSTREAM_REPO}\` advanced from \`$BASE\` to \`$HEAD\` and the change set includes one or more files that affect protocol semantics."
+            echo ""
+            echo "**Compare on GitHub:** https://github.com/${UPSTREAM_REPO}/compare/${BASE}...${HEAD}"
+            echo ""
+            echo "### Risky-file diffstat"
+            echo '```'
+            echo "$RISKY_DIFF"
+            echo '```'
+            echo ""
+            echo "### Full risky-file diff"
+            echo '```diff'
+            # shellcheck disable=SC2086
+            git diff "$BASE" "$HEAD" -- $PATHS
+            echo '```'
+            echo ""
+            echo "### Commits in range"
+            echo '```'
+            git log --oneline "$BASE..$HEAD" -- $PATHS
+            echo '```'
+            echo ""
+            echo "---"
+            echo "_When this issue is closed, the workflow will treat the SHA below as the new baseline. Apply the fix (merge any PR Claude opens), then close this issue to advance._"
+            echo ""
+            echo "<!-- baseline-sha: $HEAD -->"
+          } > drift-body.md
+
+          {
+            echo "drift_body<<__DRIFT_BODY_EOF__"
+            cat drift-body.md
+            echo "__DRIFT_BODY_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+
+      - name: Open drift issue
+        if: steps.drift.outputs.no_drift != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_BODY: ${{ steps.drift.outputs.drift_body }}
+          DRIFT_HEAD: ${{ steps.head.outputs.head }}
+        run: |
+          # Avoid spamming: if an open `upstream-drift` issue already
+          # exists for this HEAD, skip creating another. Otherwise open.
+          EXISTING=$(gh issue list --state open --label upstream-drift \
+            --search "in:title $DRIFT_HEAD" --json number --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Drift issue #$EXISTING already exists for $DRIFT_HEAD; skipping."
+            exit 0
+          fi
+
+          TITLE="🚨 Upstream drift detected — ${DRIFT_HEAD:0:7}"
+          gh issue create \
+            --title "$TITLE" \
+            --label "upstream-drift" \
+            --body "$DRIFT_BODY"
+
+      - name: Advance baseline (on issue close, not here)
+        run: |
+          echo "Baseline advancement happens via the on-issue-close workflow"
+          echo "or by auto-bump above when no risky drift was detected."

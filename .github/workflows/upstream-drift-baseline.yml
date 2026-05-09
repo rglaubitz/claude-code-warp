@@ -1,0 +1,55 @@
+name: upstream-drift-baseline
+
+# Fires when an issue labeled `upstream-drift` is closed. Reads the
+# baseline SHA out of the issue body and commits it to `.upstream-sha`
+# so the next daily check uses the closed-out HEAD as its new floor.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  advance:
+    if: contains(github.event.issue.labels.*.name, 'upstream-drift')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Extract baseline SHA from issue body
+        id: parse
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          # Look for `<!-- baseline-sha: <40-hex> -->` marker
+          SHA=$(printf '%s' "$ISSUE_BODY" | grep -oE 'baseline-sha: [0-9a-f]{40}' | head -1 | awk '{print $2}')
+          if [ -z "$SHA" ]; then
+            echo "::warning::No baseline-sha marker found in issue body; skipping baseline advance"
+            exit 0
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update .upstream-sha and commit
+        if: steps.parse.outputs.sha != ''
+        env:
+          NEW_SHA: ${{ steps.parse.outputs.sha }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          OLD_SHA=$(cat .upstream-sha 2>/dev/null || echo "<none>")
+          if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+            echo "Baseline already at $NEW_SHA; nothing to do."
+            exit 0
+          fi
+
+          echo "$NEW_SHA" > .upstream-sha
+
+          git config user.name "upstream-drift-bot"
+          git config user.email "upstream-drift-bot@users.noreply.github.com"
+          git add .upstream-sha
+          git commit -m "chore: advance upstream baseline to ${NEW_SHA:0:7} (closes #${ISSUE_NUM})"
+          git push origin HEAD:main

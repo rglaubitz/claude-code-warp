@@ -1,0 +1,152 @@
+name: claude-investigate
+
+# Fires on `upstream-drift` label, hands the issue to Claude Code.
+# Mode: attempt-fix. Claude analyzes the diff, tries to merge upstream
+# while preserving fork customizations, and opens a PR. If it can't
+# safely re-apply the customization, it instead posts an analysis
+# comment on the issue and stops.
+
+on:
+  issues:
+    types: [labeled, opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Drift issue number to act on"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  investigate:
+    # Only run for the upstream-drift label, or manual dispatch
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'upstream-drift') ||
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'upstream-drift'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "claude-investigate-bot"
+          git config user.email "claude-investigate-bot@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/warpdotdev/claude-code-warp.git
+          git fetch upstream main --depth=200
+
+      - name: Resolve issue number
+        id: issue
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "number=${{ inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Alternatively: anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          claude_args: |
+            --max-turns 30
+            --allowed-tools "Bash(git:*),Bash(gh:*),Bash(rg:*),Bash(find:*),Bash(diff:*),Read,Edit,Write,Grep,Glob"
+          prompt: |
+            You are the upstream-drift responder for this repository,
+            which is a fork of warpdotdev/claude-code-warp. The fork has
+            a small set of customizations on top of upstream that must
+            be preserved across upstream syncs.
+
+            ## Context
+
+            - This repo: rglaubitz/claude-code-warp (you are running
+              inside a checkout of it on a GitHub Actions runner).
+            - Upstream is configured as the `upstream` remote and has
+              been fetched. Compare with `git log upstream/main` and
+              `git diff main upstream/main`.
+            - Fork customizations live on `main`. The seminal commit is
+              the one with subject "feat: blank query/response so tab
+              middle line shows cwd basename". Find it with
+              `git log --grep "blank query/response"`.
+
+            ## The drift issue
+
+            Read issue #${{ steps.issue.outputs.number }} on this repo
+            (use `gh issue view ${{ steps.issue.outputs.number }}`).
+            The body contains:
+              - The upstream commit range that drifted
+              - A diff of risky files (should-use-structured.sh,
+                build-payload.sh, hooks/hooks.json, marketplace.json,
+                plugin.json)
+              - A `<!-- baseline-sha: <sha> -->` HTML comment with the
+                upstream HEAD that should become the new baseline.
+
+            ## Goal (mode: attempt fix)
+
+            Try to re-apply the fork's customizations on top of the new
+            upstream HEAD and open a PR. Concretely:
+
+            1. Read the issue body and identify the upstream HEAD SHA.
+            2. Identify the fork's customizations:
+               - `plugins/warp/scripts/on-prompt-submit.sh`: the
+                 build_payload call sends `--arg query ""` instead of
+                 `--arg query "$QUERY"`.
+               - `plugins/warp/scripts/on-stop.sh`: the build_payload
+                 call sends `--arg query ""` and `--arg response ""`
+                 instead of using the variables.
+               - `.claude-plugin/marketplace.json`: top-level `name` is
+                 `"claude-code-warp-rglaubitz"` (not the upstream
+                 `"claude-code-warp"`); `owner` block is the rglaubitz
+                 entry.
+            3. Create a branch `sync/upstream-<short-sha>` from
+               current main.
+            4. Merge upstream/main into it (`git merge upstream/main`).
+            5. Resolve any conflicts. Customizations always win for
+               the three files above. For other files, prefer upstream.
+            6. After resolution, **verify the customizations are still
+               present** by greping for them. If any are missing,
+               re-apply them.
+            7. Run the test suite if there is one (`bash tests/test-*.sh`
+               or check `.github/workflows/test.yml` for the test
+               command). Don't proceed if tests fail.
+            8. Push the branch and open a PR with:
+               - Title: `chore: sync upstream <short-sha>`
+               - Body: summary of upstream changes, confirmation that
+                 customizations are preserved, link to the drift issue
+                 with `Closes #${{ steps.issue.outputs.number }}`.
+            9. Comment on the drift issue with the PR link.
+
+            ## Bail-out conditions
+
+            If any of the following happen, do NOT force a merge.
+            Instead post an analysis comment on the drift issue
+            explaining what you found and stop:
+
+            - Upstream rewrote one of the three customized files in a
+              way that makes the fork's edit semantically inapplicable
+              (e.g. the build_payload signature changed, the field
+              names changed, the file was deleted).
+            - The protocol version `v` changed (search for
+              `PLUGIN_CURRENT_PROTOCOL_VERSION` in build-payload.sh).
+            - New event types appeared in `hooks/hooks.json` that
+              don't have corresponding scripts.
+            - Tests fail after merge and you can't fix them in <5 edits.
+
+            ## Tone
+
+            Be terse and factual in commit messages, PR description,
+            and issue comments. No marketing language. Treat this like
+            a code review note from one engineer to another.
