@@ -11,7 +11,7 @@ on:
   workflow_dispatch: {}    # manual trigger from the Actions tab
 
 permissions:
-  contents: read
+  contents: write   # needed to commit .upstream-sha baseline back to main
   issues: write
 
 env:
