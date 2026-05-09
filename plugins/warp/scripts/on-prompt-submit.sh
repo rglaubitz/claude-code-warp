@@ -22,7 +22,9 @@ if [ -n "$QUERY" ] && [ ${#QUERY} -gt 200 ]; then
     QUERY="${QUERY:0:197}..."
 fi
 
+# rglaubitz fork: blank query so Warp falls back to project (cwd basename)
+# in the tab middle line. Original line preserved for revert clarity.
 BODY=$(build_payload "$INPUT" "prompt_submit" \
-    --arg query "$QUERY")
+    --arg query "")
 
 "$SCRIPT_DIR/warp-notify.sh" "warp://cli-agent" "$BODY"

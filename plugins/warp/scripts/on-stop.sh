@@ -65,9 +65,12 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
     fi
 fi
 
+# rglaubitz fork: blank query and response so Warp falls back to project
+# (cwd basename) in the tab middle line. transcript_path preserved so the
+# click-to-view-transcript toast action still works.
 BODY=$(build_payload "$INPUT" "stop" \
-    --arg query "$QUERY" \
-    --arg response "$RESPONSE" \
+    --arg query "" \
+    --arg response "" \
     --arg transcript_path "$TRANSCRIPT_PATH")
 
 "$SCRIPT_DIR/warp-notify.sh" "warp://cli-agent" "$BODY"

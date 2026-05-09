@@ -1,9 +1,9 @@
 {
-  "name": "claude-code-warp",
-  "description": "Official Warp terminal integrations for Claude Code",
+  "name": "claude-code-warp-rglaubitz",
+  "description": "rglaubitz fork of warpdotdev/claude-code-warp with cwd-basename tab labels and upstream-drift watch",
   "owner": {
-    "name": "Warp",
-    "url": "https://warp.dev"
+    "name": "rglaubitz",
+    "url": "https://github.com/rglaubitz"
   },
   "plugins": [
     {
