@@ -16,6 +16,18 @@
 # The current protocol version this plugin knows how to produce.
 PLUGIN_CURRENT_PROTOCOL_VERSION=1
 
+# rglaubitz fork: detect the cc-mirror variant from CLAUDE_CONFIG_DIR.
+# Returns the variant basename (e.g. "reid", "elena") or "claude" for
+# the default install. Used so the OSC 777 payload's `agent` field and
+# any caller-built summary can show which CC variant is talking.
+detect_agent() {
+    if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [[ "$CLAUDE_CONFIG_DIR" == */.cc-mirror/* ]]; then
+        basename "$CLAUDE_CONFIG_DIR"
+    else
+        echo "claude"
+    fi
+}
+
 # Negotiate the protocol version with Warp.
 # Uses min(plugin_current, warp_declared), falling back to 1 if Warp doesn't advertise a version.
 negotiate_protocol_version() {
@@ -44,11 +56,15 @@ build_payload() {
         project=$(basename "$cwd")
     fi
 
+    # rglaubitz fork: agent reflects the cc-mirror variant when applicable.
+    local agent
+    agent=$(detect_agent)
+
     # Build the payload: common fields + any extra args passed by the caller.
     # Extra args should be jq flag pairs like: --arg key "value" or --argjson key '{"a":1}'
     jq -nc \
         --argjson v "$protocol_version" \
-        --arg agent "claude" \
+        --arg agent "$agent" \
         --arg event "$event" \
         --arg session_id "$session_id" \
         --arg cwd "$cwd" \

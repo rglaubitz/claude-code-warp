@@ -18,10 +18,17 @@ INPUT=$(cat)
 
 # Extract notification-specific fields
 NOTIF_TYPE=$(echo "$INPUT" | jq -r '.notification_type // "unknown"' 2>/dev/null)
-MSG=$(echo "$INPUT" | jq -r '.message // "Input needed"' 2>/dev/null)
-[ -z "$MSG" ] && MSG="Input needed"
+
+# rglaubitz fork: terse "❓ {agent} {project}" summary, matching the
+# permission_request format. The default-message ("Input needed") that
+# upstream sends here was redundant with the orange badge state.
+AGENT=$(detect_agent)
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+PROJECT=""
+[ -n "$CWD" ] && PROJECT=$(basename "$CWD")
+SUMMARY="❓ $AGENT $PROJECT"
 
 BODY=$(build_payload "$INPUT" "$NOTIF_TYPE" \
-    --arg summary "$MSG")
+    --arg summary "$SUMMARY")
 
 "$SCRIPT_DIR/warp-notify.sh" "warp://cli-agent" "$BODY"

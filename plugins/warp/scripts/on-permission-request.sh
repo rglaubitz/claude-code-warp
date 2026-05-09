@@ -21,15 +21,27 @@ TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null)
 # Fallback to empty object if jq failed or returned empty
 [ -z "$TOOL_INPUT" ] && TOOL_INPUT='{}'
 
-# Build a human-readable summary
-TOOL_PREVIEW=$(echo "$INPUT" | jq -r '(.tool_input | if .command then .command elif .file_path then .file_path else (tostring | .[0:80]) end) // ""' 2>/dev/null)
-SUMMARY="Wants to run $TOOL_NAME"
-if [ -n "$TOOL_PREVIEW" ]; then
-    if [ ${#TOOL_PREVIEW} -gt 120 ]; then
-        TOOL_PREVIEW="${TOOL_PREVIEW:0:117}..."
-    fi
-    SUMMARY="$SUMMARY: $TOOL_PREVIEW"
-fi
+# rglaubitz fork: terse summary format → "{emoji} {agent} {project}".
+# Driven entirely by tool category; no command/filename preview, since
+# the badge state is the signal and the text just identifies the
+# session at a glance from the Warp banner / vertical-tab view.
+case "$TOOL_NAME" in
+    Bash|PowerShell)            EMOJI="🔧" ;;
+    Edit|Write|MultiEdit|NotebookEdit) EMOJI="📝" ;;
+    Read)                       EMOJI="📖" ;;
+    Grep|Glob|LSP|ToolSearch)   EMOJI="🔍" ;;
+    WebFetch|WebSearch)         EMOJI="🌐" ;;
+    Task|Agent|SendMessage)     EMOJI="🤖" ;;
+    AskUserQuestion)            EMOJI="❓" ;;
+    *)                          EMOJI="🔧" ;;
+esac
+
+AGENT=$(detect_agent)
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+PROJECT=""
+[ -n "$CWD" ] && PROJECT=$(basename "$CWD")
+
+SUMMARY="$EMOJI $AGENT $PROJECT"
 
 BODY=$(build_payload "$INPUT" "permission_request" \
     --arg summary "$SUMMARY" \
